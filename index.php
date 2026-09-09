@@ -33,11 +33,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['btn_booking'])) {
     $start_time = $_POST['start_time'];
     $end_time = $_POST['end_time'];
 
+    // Định nghĩa giờ mở cửa & đóng cửa của sân bóng
+    $open_time = "05:00";
+    $close_time = "22:00";
+
     // 1. Kiểm tra thời gian kết thúc phải lớn hơn thời gian bắt đầu
     if (strtotime($end_time) <= strtotime($start_time)) {
         $booking_error = "Thời gian kết thúc phải lớn hơn thời gian bắt đầu!";
-    } else {
-        // 2. Kiểm tra trùng lịch đặt sân trong CSDL (Bỏ qua những phiếu đã bị hủy)
+    } 
+    // 2. Kiểm tra giờ đặt sân có nằm trong khung giờ hoạt động (05:00 - 22:00) hay không
+    elseif (strtotime($start_time) < strtotime($open_time) || strtotime($end_time) > strtotime($close_time)) {
+        $booking_error = "Sân bóng chỉ hoạt động từ " . $open_time . " đến " . $close_time . ". Vui lòng chọn lại khung giờ!";
+    } 
+    else {
+        // 3. Kiểm tra trùng lịch đặt sân trong CSDL (Bỏ qua những phiếu đã bị hủy)
         $check_stmt = $conn->prepare("
             SELECT start_time, end_time 
             FROM bookings 
@@ -55,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['btn_booking'])) {
             $existed_booking = $check_res->fetch_assoc();
             $booking_error = "Sân bóng đã được đặt trong khoảng thời gian này (" . $existed_booking['start_time'] . " - " . $existed_booking['end_time'] . "). Vui lòng chọn khung giờ khác!";
         } else {
-            // 3. Lấy giá tiền theo giờ của sân từ Database
+            // 4. Lấy giá tiền theo giờ của sân từ Database
             $pitch_stmt = $conn->prepare("SELECT price_per_hour FROM pitches WHERE id = ?");
             $pitch_stmt->bind_param("i", $pitch_id);
             $pitch_stmt->execute();
@@ -64,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['btn_booking'])) {
             if ($pitch_data) {
                 $price_per_hour = $pitch_data['price_per_hour'];
 
-                // 4. Tính số giờ đá (DateTime Diff)
+                // 5. Tính số giờ đá (DateTime Diff)
                 $start = new DateTime($booking_date . ' ' . $start_time);
                 $end = new DateTime($booking_date . ' ' . $end_time);
                 $interval = $start->diff($end);
@@ -72,10 +81,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['btn_booking'])) {
                 // Quy đổi tổng số phút ra số giờ (Ví dụ: 1h30p = 1.5 giờ)
                 $hours = $interval->h + ($interval->i / 60) + ($interval->days * 24);
                 
-                // 5. Tính tổng tiền chuẩn
+                // 6. Tính tổng tiền chuẩn
                 $total_price = $hours * $price_per_hour;
 
-                // 6. Lưu phiếu đặt sân vào DB
+                // 7. Lưu phiếu đặt sân vào DB
                 $stmt = $conn->prepare("INSERT INTO bookings (user_id, pitch_id, booking_date, start_time, end_time, total_price) VALUES (?, ?, ?, ?, ?, ?)");
                 $stmt->bind_param("iisssd", $user_id, $pitch_id, $booking_date, $start_time, $end_time, $total_price);
                 
@@ -172,6 +181,9 @@ if (isset($_SESSION['user_id'])) {
                     <i class="fa-solid fa-location-dot text-danger me-2"></i><strong>Địa chỉ sân bóng:</strong> <?= htmlspecialchars($sys_info['address']) ?>
                 </p>
                 <p class="mb-2 fs-6">
+                    <i class="fa-solid fa-clock text-warning me-2"></i><strong>Giờ hoạt động:</strong> <span class="badge bg-warning text-dark fs-6 ms-1">05:00 - 22:00</span> (Hằng ngày)
+                </p>
+                <p class="mb-2 fs-6">
                     <i class="fa-solid fa-phone text-success me-2"></i><strong>SĐT Chủ sân (<?= htmlspecialchars($sys_info['owner_name']) ?>):</strong> 
                     <a href="tel:<?= htmlspecialchars($sys_info['owner_phone']) ?>" class="text-warning text-decoration-none fw-bold"><?= htmlspecialchars($sys_info['owner_phone']) ?></a>
                 </p>
@@ -262,6 +274,17 @@ if (isset($_SESSION['user_id'])) {
                                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                                 </div>
                                 <div class="modal-body">
+                                    <!-- Khung hiển thị Thông tin Sân & Chủ sân -->
+                                    <div class="p-3 mb-3 bg-light rounded border">
+                                        <p class="mb-1 small">
+                                            <i class="fa-solid fa-location-dot text-danger me-2"></i><strong>Địa chỉ:</strong> <?= htmlspecialchars($sys_info['address']) ?>
+                                        </p>
+                                        <p class="mb-0 small">
+                                            <i class="fa-solid fa-user-tie text-primary me-2"></i><strong>Chủ sân:</strong> <?= htmlspecialchars($sys_info['owner_name']) ?> - 
+                                            <i class="fa-solid fa-phone text-success ms-1 me-1"></i><strong>SĐT:</strong> <a href="tel:<?= htmlspecialchars($sys_info['owner_phone']) ?>" class="text-primary text-decoration-none fw-bold"><?= htmlspecialchars($sys_info['owner_phone']) ?></a>
+                                        </p>
+                                    </div>
+
                                     <input type="hidden" name="pitch_id" value="<?= $row['id'] ?>">
                                     <div class="mb-3">
                                         <label class="form-label fw-bold">Chọn ngày đá</label>
@@ -270,15 +293,16 @@ if (isset($_SESSION['user_id'])) {
                                     <div class="row">
                                         <div class="col-6 mb-3">
                                             <label class="form-label fw-bold">Giờ bắt đầu</label>
-                                            <input type="time" name="start_time" class="form-control" required>
+                                            <input type="time" name="start_time" class="form-control" min="05:00" max="22:00" required>
                                         </div>
                                         <div class="col-6 mb-3">
                                             <label class="form-label fw-bold">Giờ kết thúc</label>
-                                            <input type="time" name="end_time" class="form-control" required>
+                                            <input type="time" name="end_time" class="form-control" min="05:00" max="22:00" required>
                                         </div>
                                     </div>
                                     <div class="alert alert-info py-2 small mb-0">
                                         Đơn giá: <strong><?= number_format($row['price_per_hour'], 0, ',', '.') ?> VNĐ/giờ</strong><br>
+                                        Giờ hoạt động: <strong class="text-danger">05:00 - 22:00</strong> hằng ngày<br>
                                         <small class="text-muted">* Tổng tiền sẽ được hệ thống tự động tính chính xác theo số giờ đá.</small>
                                     </div>
                                 </div>
